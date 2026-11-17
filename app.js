@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSAO = 2;
+const VERSAO = 3;
 const DEMO = new URLSearchParams(location.search).has('demo');
 const DB_NOME = DEMO ? 'litoteca-demo' : 'litoteca';
 const TIPOS = { minerais: 'mineral', rochas: 'rocha' };
@@ -131,9 +131,10 @@ function hidratarFotos(raiz) {
 }
 
 /* Amostra sem foto ganha um cristal desenhado, com tom derivado do nome */
-function cristal(nome, tipo = 'mineral') {
+function cristal(nome, tipo = 'mineral', matizFixo) {
   let h = 0;
   for (const c of norm(nome)) h = (h * 31 + c.charCodeAt(0)) % 360;
+  if (matizFixo !== undefined) h = matizFixo;
   if (tipo === 'rocha') return `<svg class="cristal" viewBox="0 0 100 100" aria-hidden="true" style="--h:${h}">
     <path class="f1" d="M14 66 26 40 48 30 54 56 34 78z"/><path class="f2" d="M48 30 74 34 86 58 54 56z"/>
     <path class="f3" d="M54 56 86 58 76 76 34 78z"/>
@@ -170,83 +171,114 @@ function rota() {
 }
 let abaDeContexto = 'minerais';
 
-/* ---------- tela: lista de classes ---------- */
+/* ---------- vitrine ---------- */
 
-function telaLista(tipo) {
-  const aba = tipo === 'mineral' ? 'minerais' : 'rochas';
-  const total = estado.amostras.filter(a => a.tipo === tipo).length;
-  const nClasses = estado.classes[tipo].length;
-  const busca = lsGet('busca:' + tipo, '');
-  app.innerHTML = `
-    <header class="topo">
-      <p class="marca">Litoteca${DEMO ? ' · demonstração' : ''}</p>
-      <h1>${ROTULO[tipo][1]}</h1>
-      <p class="resumo">${total} ${total === 1 ? 'amostra' : 'amostras'} em ${nClasses} classes</p>
-    </header>
-    <div class="busca">
-      <input type="search" id="busca" placeholder="Buscar por nome, fórmula, cor, local" value="${esc(busca)}" autocomplete="off" enterkeyhint="search">
-    </div>
-    <div id="classes"></div>`;
-  const campo = $('#busca');
-  campo.addEventListener('input', () => { lsSet('busca:' + tipo, campo.value); desenharClasses(tipo, campo.value); });
-  desenharClasses(tipo, busca);
+const MATIZ = {
+  nativos: 45, sulfetos: 210, haloides: 315, oxidos: 8, carbonatos: 155, sulfatos: 195, fosfatos: 95,
+  neso: 345, soro: 70, ciclo: 170, ino: 25, filo: 35, tecto: 262,
+  plutonicas: 15, vulcanicas: 355, clasticas: 32, quimicas: 190, organicas: 80, foliadas: 228, naofoliadas: 300
+};
+function matiz(id) {
+  if (id in MATIZ) return MATIZ[id];
+  let h = 0;
+  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
 }
-
+function numero(a) {
+  const d = String(a.registro || '').match(/\d+/);
+  return d ? 'Nº ' + String(Number(d[0])).padStart(3, '0') : 'Nº ?';
+}
+function ordenar(lista) {
+  const n = a => { const d = String(a.registro || '').match(/\d+/); return d ? Number(d[0]) : 1e9; };
+  return [...lista].sort((x, y) => n(x) - n(y) || x.nome.localeCompare(y.nome, 'pt-BR'));
+}
+function selo(tipo, id, curto) {
+  const c = classePorId(tipo, id);
+  const nome = c ? c.nome : 'sem classe';
+  return `<span class="selo" style="--h:${matiz(id)}">${esc(curto ? nome.replace(/^(Ígneas|Sedimentares|Metamórficas) /, '') : nome)}</span>`;
+}
 function bateBusca(a, q) {
   const alvo = norm([a.nome, a.registro, a.campos.variedade, a.campos.formula, a.campos.cor, a.campos.procedencia, a.campos.composicao, a.campos.ocorrencia].join(' '));
   return q.split(/\s+/).every(p => alvo.includes(p));
 }
+let listaVisivel = [];
 
-function desenharClasses(tipo, busca) {
-  const q = norm(busca);
-  const abertas = lsGet('abertas', {});
-  let grupo = null;
-  let html = '';
-  let algum = false;
-  for (const c of estado.classes[tipo]) {
-    let lista = amostrasDaClasse(tipo, c.id);
-    if (q) lista = lista.filter(a => bateBusca(a, q));
-    if (q && !lista.length) continue;
-    algum = true;
-    if ((c.grupo || null) !== grupo) {
-      grupo = c.grupo || null;
-      if (grupo) html += `<h2 class="grupo">${esc(grupo)}</h2>`;
-    }
-    const aberta = q ? true : !!abertas[tipo + ':' + c.id];
-    html += `
-      <details class="classe" data-id="${esc(c.id)}" ${aberta ? 'open' : ''}>
-        <summary><span class="nome">${esc(c.nome)}</span><span class="qtd">${lista.length}</span></summary>
-        <div class="corpo">
-          <div class="desc" data-desc>
-            <p>${c.desc ? esc(c.desc) : '<span class="vazio">Sem descrição ainda.</span>'}</p>
-            <button type="button" class="link" data-editar-desc>Editar descrição</button>
-          </div>
-          ${lista.length ? `<ul class="grade">${lista.map(cartao).join('')}</ul>` : ''}
-          <a class="botao secundario" href="#/nova/${tipo}/${encodeURIComponent(c.id)}">Adicionar amostra</a>
-        </div>
-      </details>`;
-  }
-  if (!algum) html = `<p class="nada">Nada encontrado para “${esc(busca)}”.</p>`;
-  const alvo = $('#classes');
-  alvo.innerHTML = html;
-  hidratarFotos(alvo);
-  $$('details.classe', alvo).forEach(d => d.addEventListener('toggle', () => {
-    if (q) return;
-    const ab = lsGet('abertas', {});
-    ab[tipo + ':' + d.dataset.id] = d.open;
-    lsSet('abertas', ab);
+function telaLista(tipo) {
+  const total = estado.amostras.filter(a => a.tipo === tipo).length;
+  const filtro = lsGet('filtro:' + tipo, 'todas');
+  const busca = lsGet('busca:' + tipo, '');
+  const contagem = id => estado.amostras.filter(a => a.tipo === tipo && a.classe === id).length;
+  app.innerHTML = `
+    <header class="topo">
+      <p class="marca">Litoteca${DEMO ? ' · demonstração' : ''}</p>
+      <div class="titulo-linha"><h1>${ROTULO[tipo][1]}</h1>
+        ${total ? `<button type="button" class="botao-expo" id="abrir-expo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14l11-7z"/></svg>Exposição</button>` : ''}</div>
+      <p class="resumo">${total} ${total === 1 ? 'peça' : 'peças'} em exibição</p>
+    </header>
+    <div class="fixo">
+      <input type="search" id="busca" placeholder="Buscar por nome, fórmula, cor, local" value="${esc(busca)}" autocomplete="off" enterkeyhint="search">
+      <div class="filtros" role="group" aria-label="Filtrar por classe">
+        <button type="button" data-filtro="todas" aria-pressed="${filtro === 'todas'}">Todas<span>${total}</span></button>
+        ${estado.classes[tipo].map(c => `<button type="button" data-filtro="${esc(c.id)}" aria-pressed="${filtro === c.id}" style="--h:${matiz(c.id)}"><i></i>${esc(c.nome)}<span>${contagem(c.id)}</span></button>`).join('')}
+      </div>
+    </div>
+    <div id="vitrine"></div>`;
+  const campo = $('#busca');
+  campo.addEventListener('input', () => { lsSet('busca:' + tipo, campo.value); desenharVitrine(tipo); });
+  $$('.filtros button').forEach(b => b.addEventListener('click', () => {
+    lsSet('filtro:' + tipo, b.dataset.filtro);
+    $$('.filtros button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    b.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    desenharVitrine(tipo);
   }));
-  $$('[data-editar-desc]', alvo).forEach(b => b.addEventListener('click', () => editarDescricao(tipo, b.closest('details').dataset.id, b.closest('[data-desc]'))));
+  $('.filtros [aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  $('#abrir-expo')?.addEventListener('click', () => exposicao(listaVisivel, 0));
+  desenharVitrine(tipo);
 }
 
-function cartao(a) {
-  const capa = a.fotos?.length
-    ? `<img data-foto="${esc(a.fotos[0])}" alt="" loading="lazy">`
-    : cristal(a.nome, a.tipo);
-  const sub = a.tipo === 'mineral' && a.campos.formula ? `<span class="formula">${formula(a.campos.formula)}</span>` : `<span>${esc(a.campos.variedade || a.campos.procedencia || '')}</span>`;
-  return `<li><a class="cartao" href="#/amostra/${encodeURIComponent(a.id)}">
-    <div class="capa">${capa}</div>
-    <div class="legenda"><strong>${esc(a.nome)}</strong>${sub}<span class="registro">${esc(a.registro)}</span></div>
+function desenharVitrine(tipo) {
+  const filtro = lsGet('filtro:' + tipo, 'todas');
+  const q = norm($('#busca').value);
+  const alvo = $('#vitrine');
+  let pecas = estado.amostras.filter(a => a.tipo === tipo);
+  if (q) pecas = pecas.filter(a => bateBusca(a, q));
+  let html = '';
+  if (filtro !== 'todas' && classePorId(tipo, filtro)) {
+    const c = classePorId(tipo, filtro);
+    pecas = ordenar(pecas.filter(a => a.classe === filtro));
+    html += `
+      <section class="painel" style="--h:${matiz(c.id)}">
+        <p class="marca">${esc(c.grupo || ROTULO[tipo][1])}</p>
+        <h2>${esc(c.nome)}</h2>
+        <div class="desc" data-desc data-id="${esc(c.id)}">
+          <p>${c.desc ? esc(c.desc) : '<span class="vazio">Sem descrição ainda.</span>'}</p>
+          <button type="button" class="link" data-editar-desc>Editar descrição</button>
+        </div>
+      </section>
+      ${pecas.length ? `<ul class="grade">${pecas.map(peca).join('')}</ul>` : `<p class="nada">${q ? 'Nada encontrado nesta classe.' : 'Nenhuma peça nesta classe ainda.'}</p>`}
+      <a class="botao secundario largo" href="#/nova/${tipo}/${encodeURIComponent(c.id)}">Adicionar peça em ${esc(c.nome)}</a>`;
+  } else {
+    pecas = ordenar(pecas);
+    if (!pecas.length) {
+      html = q ? `<p class="nada">Nada encontrado para "${esc($('#busca').value)}".</p>`
+        : `<div class="vazio-vitrine">${cristal('litoteca', tipo)}<h2>A vitrine está vazia</h2><p>Cadastre a primeira peça. Digitando o nome, a ficha se preenche com os dados de referência.</p></div>`;
+    } else {
+      html += `<ul class="grade">${pecas.map(peca).join('')}</ul>`;
+    }
+    html += `<a class="botao largo" href="#/nova/${tipo}/${encodeURIComponent(estado.classes[tipo][0].id)}">Adicionar peça</a>`;
+  }
+  listaVisivel = pecas;
+  alvo.innerHTML = html;
+  hidratarFotos(alvo);
+  $$('[data-ir]', alvo).forEach(b => b.addEventListener('click', () => { $(`.filtros [data-filtro="${CSS.escape(b.dataset.ir)}"]`).click(); window.scrollTo({ top: 0 }); }));
+  $$('[data-editar-desc]', alvo).forEach(b => b.addEventListener('click', () => editarDescricao(tipo, b.closest('[data-desc]').dataset.id, b.closest('[data-desc]'))));
+}
+
+function peca(a) {
+  const capa = a.fotos?.length ? `<img data-foto="${esc(a.fotos[0])}" alt="" loading="lazy">` : cristal(a.nome, a.tipo, matiz(a.classe));
+  return `<li><a class="peca" href="#/amostra/${encodeURIComponent(a.id)}" style="--h:${matiz(a.classe)}">
+    <div class="vitrine-luz${a.fotos?.length ? ' com-foto' : ''}">${capa}</div>
+    <div class="etiqueta"><span class="num">${numero(a)}</span><strong>${esc(a.nome)}</strong>${selo(a.tipo, a.classe, true)}</div>
   </a></li>`;
 }
 
@@ -261,39 +293,53 @@ function editarDescricao(tipo, id, caixa) {
   $('[data-ok]', caixa).addEventListener('click', async () => {
     c.desc = ta.value.trim();
     await salvarClasses();
-    desenharClasses(tipo, $('#busca').value);
+    desenharVitrine(tipo);
     avisar('Descrição salva');
   });
-  $('[data-cancelar]', caixa).addEventListener('click', () => desenharClasses(tipo, $('#busca').value));
+  $('[data-cancelar]', caixa).addEventListener('click', () => desenharVitrine(tipo));
 }
 
-/* ---------- tela: ficha da amostra ---------- */
+/* ---------- ficha ---------- */
 
-function mohs(valor) {
-  const nums = String(valor || '').replace(/,/g, '.').match(/\d+(\.\d+)?/g);
-  if (!nums) return '';
-  const v = nums.map(Number).filter(n => n >= 1 && n <= 10);
-  if (!v.length) return '';
-  const min = Math.min(...v), max = Math.max(...v);
-  const pos = n => ((n - 1) / 9) * 100;
-  const ref = ['Talco', 'Gipsita', 'Calcita', 'Fluorita', 'Apatita', 'Ortoclásio', 'Quartzo', 'Topázio', 'Coríndon', 'Diamante'];
-  return `<figure class="mohs" aria-label="Dureza ${esc(valor)} na escala de Mohs">
-    <div class="trilho"><span class="faixa" style="left:${pos(min)}%;width:${Math.max(pos(max) - pos(min), 0)}%"></span>
-    <span class="ponto" style="left:${pos(min)}%"></span>${max > min ? `<span class="ponto" style="left:${pos(max)}%"></span>` : ''}</div>
-    <div class="escala">${ref.map((r, i) => `<span title="${r}">${i + 1}</span>`).join('')}</div>
-    <figcaption>${[Math.ceil(min) >= 2 ? 'mais duro que ' + ref[Math.ceil(min) - 2].toLowerCase() : '', Math.floor(max) <= 9 ? 'mais mole que ' + ref[Math.floor(max)].toLowerCase() : ''].filter(Boolean).join(', ').replace(/^./, l => l.toUpperCase())}</figcaption>
-  </figure>`;
+function primeiroNumero(v) {
+  const n = String(v || '').replace(/,/g, '.').match(/\d+(\.\d+)?/g);
+  return n ? n.map(Number) : null;
+}
+function atributos(a) {
+  const barras = [];
+  const d = primeiroNumero(a.campos.dureza);
+  if (d) {
+    const v = d.filter(n => n >= 1 && n <= 10);
+    if (v.length) {
+      const min = Math.min(...v), max = Math.max(...v);
+      const ref = ['talco', 'gipsita', 'calcita', 'fluorita', 'apatita', 'ortoclásio', 'quartzo', 'topázio', 'coríndon', 'diamante'];
+      const nota = [Math.ceil(min) >= 2 ? 'risca ' + ref[Math.ceil(min) - 2] : '', Math.floor(max) <= 9 ? 'riscado por ' + ref[Math.floor(max)] : ''].filter(Boolean).join(', ');
+      barras.push(`<div class="atributo"><div class="atr-topo"><span>Dureza</span><b>${esc(a.campos.dureza)}</b></div>
+        <div class="trilho-a"><span style="left:${(min / 10) * 100}%;width:0"></span><i style="width:${(max / 10) * 100}%"></i></div>
+        <small>escala de Mohs, 1 a 10${nota ? ' · ' + nota : ''}</small></div>`);
+    }
+  }
+  const g = primeiroNumero(a.campos.densidade);
+  if (g) {
+    const max = Math.max(...g);
+    barras.push(`<div class="atributo"><div class="atr-topo"><span>Densidade</span><b>${esc(a.campos.densidade)} g/cm³</b></div>
+      <div class="trilho-a"><i style="width:${Math.min(max / 10, 1) * 100}%"></i></div>
+      <small>${max < 2.9 ? 'leve' : max < 4 ? 'média' : max < 6 ? 'pesada' : 'muito pesada'} para o tamanho${max > 10 ? ' · fora da escala de 10' : ''}</small></div>`);
+  }
+  return barras.length ? `<section class="atributos">${barras.join('')}</section>` : '';
 }
 
 async function telaAmostra(id) {
   const a = estado.amostras.find(x => x.id === id);
-  if (!a) { app.innerHTML = `<p class="nada">Amostra não encontrada. <a href="#/minerais">Voltar</a></p>`; return; }
+  if (!a) { app.innerHTML = `<p class="nada">Peça não encontrada. <a href="#/minerais">Voltar</a></p>`; return; }
   abaDeContexto = a.tipo === 'mineral' ? 'minerais' : 'rochas';
   marcarAba();
-  const cl = classePorId(a.tipo, a.classe);
+  const irmas = ordenar(estado.amostras.filter(x => x.tipo === a.tipo));
+  const i = irmas.findIndex(x => x.id === a.id);
+  const ant = irmas[i - 1], prox = irmas[i + 1];
   const linhas = [];
   for (const sec of CAMPOS[a.tipo]) for (const [k, rot] of sec.campos) {
-    if (k === 'formula' || k === 'curiosidades' || k === 'composicao' || k === 'variedade') continue;
+    if (['formula', 'curiosidades', 'composicao', 'variedade', 'dureza', 'densidade'].includes(k)) continue;
     const v = a.campos[k];
     if (v) linhas.push(`<tr><th scope="row">${esc(rot)}</th><td>${esc(v)}</td></tr>`);
   }
@@ -306,24 +352,102 @@ async function telaAmostra(id) {
     ? estado.amostras.filter(r => r.tipo === 'rocha' && (r.campos.composicao || '').split(/[,;]/).some(m => norm(m) === norm(a.nome)))
     : [];
   app.innerHTML = `
-    <div class="barra"><a class="voltar" href="#/${abaDeContexto}">${ROTULO[a.tipo][1]}</a><a class="link" href="#/editar/${encodeURIComponent(a.id)}">Editar</a></div>
-    ${a.fotos?.length ? `<div class="galeria">${a.fotos.map(f => `<button type="button" class="foto" data-ampliar="${esc(f)}"><img data-foto="${esc(f)}" data-campo="grande" alt="Foto da amostra ${esc(a.nome)}"></button>`).join('')}</div>`
-      : `<div class="galeria vazia">${cristal(a.nome, a.tipo)}</div>`}
-    ${a.fotos?.length > 1 ? `<p class="dica-galeria">${a.fotos.length} fotos · deslize para o lado</p>` : ''}
+    <div class="barra"><a class="voltar" href="#/${abaDeContexto}">${ROTULO[a.tipo][1]}</a>
+      <span class="navega">${ant ? `<a href="#/amostra/${encodeURIComponent(ant.id)}" aria-label="Peça anterior, ${esc(ant.nome)}">‹</a>` : '<span>‹</span>'}<em>${i + 1} de ${irmas.length}</em>${prox ? `<a href="#/amostra/${encodeURIComponent(prox.id)}" aria-label="Próxima peça, ${esc(prox.nome)}">›</a>` : '<span>›</span>'}</span>
+      <a class="link" href="#/editar/${encodeURIComponent(a.id)}">Editar</a></div>
+    <div class="palco" style="--h:${matiz(a.classe)}">
+      ${a.fotos?.length ? `<div class="galeria">${a.fotos.map(f => `<button type="button" class="foto" data-ampliar="${esc(f)}"><img data-foto="${esc(f)}" data-campo="grande" alt="Foto da peça ${esc(a.nome)}"></button>`).join('')}</div>`
+        : `<div class="sem-foto">${cristal(a.nome, a.tipo, matiz(a.classe))}</div>`}
+      <span class="num-palco">${numero(a)}</span>
+      ${a.fotos?.length > 1 ? `<span class="qtd-fotos">${a.fotos.length} fotos</span>` : ''}
+    </div>
     <header class="ficha">
-      <p class="marca">${esc(a.registro)} · ${esc(cl ? cl.nome : 'sem classe')}</p>
+      <div class="selos">${selo(a.tipo, a.classe)}${a.campos.sistema ? `<span class="selo neutro">${esc(a.campos.sistema)}</span>` : ''}</div>
       <h1>${esc(a.nome)}</h1>
       ${a.campos.variedade ? `<p class="variedade">${esc(a.campos.variedade)}</p>` : ''}
       ${a.campos.formula ? `<p class="formula grande">${formula(a.campos.formula)}</p>` : ''}
     </header>
-    ${a.tipo === 'mineral' ? mohs(a.campos.dureza) : ''}
-    ${linhas.length ? `<section class="bloco"><h2>Propriedades</h2><table class="props"><tbody>${linhas.join('')}</tbody></table></section>` : ''}
+    ${atributos(a)}
+    ${a.campos.curiosidades ? `<section class="bloco destaque"><h2>Curiosidades</h2><p class="texto">${esc(a.campos.curiosidades).replace(/\n/g, '<br>')}</p></section>` : ''}
+    ${linhas.length ? `<section class="bloco"><h2>Etiqueta</h2><table class="props"><tbody>${linhas.join('')}</tbody></table></section>` : ''}
     ${comp}
     ${rochasCom.length ? `<section class="bloco"><h2>Presente nas rochas</h2><ul class="chips">${rochasCom.map(r => `<li><a href="#/amostra/${encodeURIComponent(r.id)}">${esc(r.nome)}</a></li>`).join('')}</ul></section>` : ''}
-    ${a.campos.curiosidades ? `<section class="bloco"><h2>Curiosidades</h2><p class="texto">${esc(a.campos.curiosidades).replace(/\n/g, '<br>')}</p></section>` : ''}
-    <p class="rodape-ficha">Cadastrada em ${new Date(a.criado).toLocaleDateString('pt-BR')}${a.atualizado !== a.criado ? ' · editada em ' + new Date(a.atualizado).toLocaleDateString('pt-BR') : ''}</p>`;
+    <div class="acoes-linha"><button type="button" class="botao secundario" id="expo-daqui">Ver em exposição</button></div>
+    <p class="rodape-ficha">${esc(a.registro)} · cadastrada em ${new Date(a.criado).toLocaleDateString('pt-BR')}${a.atualizado !== a.criado ? ' · editada em ' + new Date(a.atualizado).toLocaleDateString('pt-BR') : ''}</p>`;
   hidratarFotos(app);
   $$('[data-ampliar]', app).forEach(b => b.addEventListener('click', () => ampliar(b.dataset.ampliar, a.nome)));
+  $('#expo-daqui').addEventListener('click', () => exposicao(irmas, i));
+}
+
+/* ---------- modo exposição ---------- */
+
+function exposicao(lista, inicio) {
+  if (!lista.length) return;
+  let i = inicio;
+  let tocando = true;
+  let relogio;
+  const v = document.createElement('div');
+  v.className = 'expo';
+  v.setAttribute('role', 'dialog');
+  v.setAttribute('aria-label', 'Exposição');
+  v.innerHTML = `
+    <div class="expo-palco"></div>
+    <div class="expo-legenda" aria-live="polite"></div>
+    <div class="expo-topo"><span class="expo-conta"></span>
+      <button type="button" class="expo-btn" data-pausa>Pausar</button>
+      <button type="button" class="expo-btn" data-fechar>Fechar</button></div>
+    <button type="button" class="expo-lado esq" data-ant aria-label="Anterior"></button>
+    <button type="button" class="expo-lado dir" data-prox aria-label="Próxima"></button>
+    <div class="expo-barra"><i></i></div>`;
+  const palco = $('.expo-palco', v), leg = $('.expo-legenda', v), barra = $('.expo-barra i', v);
+  async function mostrar() {
+    const a = lista[i];
+    const cl = classePorId(a.tipo, a.classe);
+    const url = a.fotos?.length ? await urlFoto(a.fotos[0], 'grande') : null;
+    const quadro = document.createElement('div');
+    quadro.className = 'expo-quadro';
+    quadro.style.setProperty('--h', matiz(a.classe));
+    quadro.innerHTML = url ? `<img src="${url}" alt="${esc(a.nome)}">` : cristal(a.nome, a.tipo, matiz(a.classe));
+    palco.append(quadro);
+    requestAnimationFrame(() => quadro.classList.add('entra'));
+    [...palco.children].slice(0, -1).forEach(q => { q.classList.remove('entra'); setTimeout(() => q.remove(), 900); });
+    leg.innerHTML = `<p class="expo-num">${numero(a)} · ${esc(cl ? cl.nome : '')}</p><h2>${esc(a.nome)}</h2>
+      ${a.campos.formula ? `<p class="expo-formula">${formula(a.campos.formula)}</p>` : ''}
+      ${a.campos.procedencia ? `<p class="expo-proc">${esc(a.campos.procedencia)}</p>` : ''}`;
+    $('.expo-conta', v).textContent = `${i + 1} / ${lista.length}`;
+    agendar();
+  }
+  function agendar() {
+    clearTimeout(relogio);
+    barra.style.transition = 'none';
+    barra.style.width = '0';
+    if (!tocando || lista.length < 2) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => { barra.style.transition = 'width 7s linear'; barra.style.width = '100%'; }));
+    relogio = setTimeout(() => ir(1), 7000);
+  }
+  function ir(d) { i = (i + d + lista.length) % lista.length; mostrar(); }
+  function fechar() { clearTimeout(relogio); v.remove(); document.removeEventListener('keydown', tecla); }
+  function tecla(e) {
+    if (e.key === 'Escape') fechar();
+    if (e.key === 'ArrowRight') ir(1);
+    if (e.key === 'ArrowLeft') ir(-1);
+  }
+  $('[data-fechar]', v).addEventListener('click', fechar);
+  $('[data-ant]', v).addEventListener('click', () => ir(-1));
+  $('[data-prox]', v).addEventListener('click', () => ir(1));
+  $('[data-pausa]', v).addEventListener('click', e => { tocando = !tocando; e.target.textContent = tocando ? 'Pausar' : 'Continuar'; agendar(); });
+  let x0 = null;
+  v.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  v.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    x0 = null;
+    if (Math.abs(dx) > 50) ir(dx < 0 ? 1 : -1);
+  });
+  document.addEventListener('keydown', tecla);
+  document.body.append(v);
+  $('[data-fechar]', v).focus();
+  mostrar();
 }
 
 async function ampliar(id, nome) {

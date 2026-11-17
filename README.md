@@ -6,6 +6,9 @@ Catálogo pessoal de minerais e rochas que roda no iPhone como app (PWA), feito 
 
 ## O que faz
 
+* **Vitrine**: cada peça vira um cartão numerado (Nº 001) sobre fundo escuro com foco de luz, com selo colorido da classe. Filtros por classe no topo.
+* **Modo exposição**: tela cheia, uma peça por vez com legenda de museu, passando sozinha a cada 7 segundos ou pelo deslizar do dedo. Feito para mostrar a coleção pelo celular.
+* **Ficha de peça**: foto em destaque, barras de dureza e densidade, etiqueta com as propriedades e setas para a peça anterior e a próxima.
 * Abas de **Minerais** e **Rochas**, cada uma dividida em classes (elementos nativos, sulfetos, halóides, óxidos, carbonatos, sulfatos, fosfatos e as seis subclasses de silicatos; ígneas, sedimentares e metamórficas). Cada classe tem uma descrição editável.
 * Botão **Adicionar amostra** em cada classe, com a ficha pronta: dureza, densidade, traço, brilho, cor, clivagem, fratura, sistema cristalino, hábito, área de incidência, procedência, curiosidades e fotos.
 * **Preenchimento automático:** ao digitar um nome conhecido (83 minerais e 43 rochas na base de referência), os campos vazios se preenchem com valores típicos, marcados em destaque para revisão. Tudo continua editável.
