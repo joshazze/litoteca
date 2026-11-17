@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSAO = 1;
+const VERSAO = 2;
 const DEMO = new URLSearchParams(location.search).has('demo');
 const DB_NOME = DEMO ? 'litoteca-demo' : 'litoteca';
 const TIPOS = { minerais: 'mineral', rochas: 'rocha' };
@@ -357,7 +357,17 @@ async function telaFormulario(tipo, classeId, idEdicao) {
   let fotos = edicao ? edicao.fotos.map(id => ({ id, existente: true })) : [];
   let preenchidoPelaRef = [];
 
-  const opcoesClasse = estado.classes[tipo].map(c => `<option value="${esc(c.id)}" ${c.id === classeId ? 'selected' : ''}>${esc(c.grupo ? c.grupo + ' · ' + c.nome : c.nome)}</option>`).join('');
+  let opcoesClasse = '';
+  let grupoAtual = null;
+  for (const c of estado.classes[tipo]) {
+    if ((c.grupo || null) !== grupoAtual) {
+      if (grupoAtual) opcoesClasse += '</optgroup>';
+      grupoAtual = c.grupo || null;
+      if (grupoAtual) opcoesClasse += `<optgroup label="${esc(grupoAtual)}">`;
+    }
+    opcoesClasse += `<option value="${esc(c.id)}" ${c.id === classeId ? 'selected' : ''}>${esc(c.nome)}</option>`;
+  }
+  if (grupoAtual) opcoesClasse += '</optgroup>';
   const listas = Object.entries(SUGESTOES).map(([k, l]) => `<datalist id="l-${k}">${l.map(x => `<option value="${esc(x)}">`).join('')}</datalist>`).join('');
   const nomes = `<datalist id="l-nomes">${REF[tipo].map(r => `<option value="${esc(r.nome)}">`).join('')}</datalist>`;
   const nomesMinerais = `<datalist id="l-minerais">${[...new Set([...REF.mineral.map(r => r.nome), ...estado.amostras.filter(a => a.tipo === 'mineral').map(a => a.nome)])].map(n => `<option value="${esc(n)}">`).join('')}</datalist>`;

@@ -1,6 +1,6 @@
 /* Rede primeiro para tudo do próprio site, cache como reserva para abrir sem internet.
    Mudou app.js, style.css ou ref.js? Suba V aqui e o ?v= no index.html. */
-const V = 1;
+const V = 2;
 const CACHE = 'litoteca-v' + V;
 const SHELL = ['./', 'index.html', `style.css?v=${V}`, `app.js?v=${V}`, `ref.js?v=${V}`, 'manifest.webmanifest',
   'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
